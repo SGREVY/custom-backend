@@ -1,0 +1,40 @@
+
+# Compilación de .NET
+bin/
+obj/
+
+# Archivos de Visual Studio
+.vs/
+*.user
+*.suo
+
+# Configuraciones locales y secretos
+appsettings.Development.json
+appsettings.Local.json
+secrets.json
+
+# Variables de entorno
+.env
+.env.*
+
+# Logs
+*.log
+
+# Archivos temporales
+*.tmp
+*.bak
+
+# Carpetas de publicación
+publish/
+artifacts/
+
+appsettings.json
+
+# Certificados y claves
+*.pfx
+*.p12
+*.key
+
+# Archivos de configuración local
+appsettings.*.json
+!appsettings.example.json
