@@ -21,7 +21,7 @@ builder.Services.AddCors(options =>
     {
         policy
         .WithOrigins("http://localhost:5173",
-        "https://custom.netlify.app")
+        "https://custom-system-2.netlify.app")
         .AllowAnyHeader()
         .AllowAnyMethod();
     });
