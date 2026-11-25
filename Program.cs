@@ -213,6 +213,63 @@ app.MapGet("/api/vacaciones/solicitudes", async (
 });
 
 // ==========================================
+// APROBAR O RECHAZAR SOLICITUD DE VACACIONES
+// ==========================================
+
+app.MapPut("/api/vacaciones/{id:int}/estado", async (
+    int id,
+    ActualizarEstadoVacacionesRequest request,
+    ApplicationDbContext db) =>
+{
+    var solicitud = await db.SolicitudesVacaciones
+        .FirstOrDefaultAsync(v => v.Id == id);
+
+    if (solicitud == null)
+    {
+        return Results.NotFound(new
+        {
+            mensaje = "No se encontró la solicitud."
+        });
+    }
+
+    var nuevoEstado = request.Estado?.ToUpperInvariant();
+
+    if (nuevoEstado != "APROBADA" &&
+        nuevoEstado != "RECHAZADA")
+    {
+        return Results.BadRequest(new
+        {
+            mensaje = "El estado debe ser APROBADA o RECHAZADA."
+        });
+    }
+
+    if (solicitud.Estado != "PENDIENTE")
+    {
+        return Results.BadRequest(new
+        {
+            mensaje = "Esta solicitud ya fue respondida."
+        });
+    }
+
+    solicitud.Estado = nuevoEstado;
+
+    solicitud.FechaRespuesta = DateTime.SpecifyKind(
+        DateTime.UtcNow,
+        DateTimeKind.Unspecified
+    );
+
+    await db.SaveChangesAsync();
+
+    return Results.Ok(new
+    {
+        mensaje = "Solicitud actualizada correctamente.",
+        solicitud.Id,
+        solicitud.Estado,
+        solicitud.FechaRespuesta
+    });
+});
+
+// ==========================================
 // PERFIL DEL EMPLEADO
 // ==========================================
 
@@ -501,11 +558,15 @@ app.MapPost("/api/login", async (
 app.Run();
 
 // ==========================================
-// MODELO PARA RECIBIR SOLICITUDES
+// MODELOS PARA RECIBIR SOLICITUDES
 // ==========================================
 
 public record SolicitudVacacionesRequest(
     int UsuarioId,
     DateOnly FechaInicio,
     DateOnly FechaFin
+);
+
+public record ActualizarEstadoVacacionesRequest(
+    string Estado
 );
