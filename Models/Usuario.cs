@@ -13,5 +13,5 @@ public class Usuario
 
     public bool Activo { get; set; } = true;
 
-    public string Rol { get; set; } = "EMPLEADO";
+    public string rol { get; set; } = "EMPLEADO";
 }
