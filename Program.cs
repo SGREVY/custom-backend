@@ -1,6 +1,11 @@
+
 using Backend_custom_test.API.Data;
 using Backend_custom_test.API.Models;
 using Microsoft.EntityFrameworkCore;
+
+// ==========================================
+// MÉTODO PARA CALCULAR LA GUARDIA MENSUAL
+// ==========================================
 
 static DateOnly CalcularGuardiaMensual(
     DateOnly primeraGuardia,
@@ -36,6 +41,10 @@ static DateOnly CalcularGuardiaMensual(
     return new DateOnly(anio, mes, dia);
 }
 
+// ==========================================
+// CONFIGURACIÓN DEL SERVIDOR
+// ==========================================
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
@@ -44,33 +53,28 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
     )
 );
 
-//var es la variable en c#
-//builder es el nombre de la variable
-//webaplication es una clase de asp.net
-//create builder crea el constructor para preparar la configuracion de nuestra app
-//args resive los argumentos que pueden enviarse al ejecutar el programa
-
+// Configuración CORS
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("ReactPolicy", policy =>
     {
         policy
-        .WithOrigins("http://localhost:5173",
-        "https://custom-system-2.netlify.app")
-        .AllowAnyHeader()
-        .AllowAnyMethod();
+            .WithOrigins(
+                "http://localhost:5173",
+                "https://custom-system-2.netlify.app"
+            )
+            .AllowAnyHeader()
+            .AllowAnyMethod();
     });
 });
 
-
 var app = builder.Build();
-//basicamente es otra variable para que funcione la variable de arriba
-//builder = planos y materiales 
-//build = contruye el edificio 
-//app = edificio construido
 
 app.UseCors("ReactPolicy");
 
+// ==========================================
+// PERFIL DEL EMPLEADO
+// ==========================================
 
 app.MapGet("/api/perfil/{usuarioId}", async (
     int usuarioId,
@@ -101,6 +105,9 @@ app.MapGet("/api/perfil/{usuarioId}", async (
     });
 });
 
+// ==========================================
+// CALENDARIO INDIVIDUAL
+// ==========================================
 
 app.MapGet("/api/calendario/{empleadoId}", async (
     int empleadoId,
@@ -108,15 +115,16 @@ app.MapGet("/api/calendario/{empleadoId}", async (
     int mes,
     ApplicationDbContext db) =>
 {
-    if (mes < 1 || mes > 12)
+    if (mes < 1 || mes > 12 || anio < 1 || anio > 9999)
     {
         return Results.BadRequest(new
         {
-            mensaje = "El mes debe estar entre 1 y 12"
+            mensaje = "El año o mes no son válidos"
         });
     }
 
     var horario = await db.HorariosEmpleados
+        .AsNoTracking()
         .FirstOrDefaultAsync(h => h.EmpleadoId == empleadoId);
 
     if (horario == null)
@@ -127,12 +135,22 @@ app.MapGet("/api/calendario/{empleadoId}", async (
         });
     }
 
+    var primerDia = new DateOnly(anio, mes, 1);
+
+    var ultimoDia = new DateOnly(
+        anio,
+        mes,
+        DateTime.DaysInMonth(anio, mes)
+    );
+
     var vacaciones = await db.SolicitudesVacaciones
-        .Where(v => v.EmpleadoId == empleadoId &&
-                    v.Estado == "APROBADA" &&
-                    v.FechaInicio <= new DateOnly(anio, mes,
-                        DateTime.DaysInMonth(anio, mes)) &&
-                    v.FechaFin >= new DateOnly(anio, mes, 1))
+        .AsNoTracking()
+        .Where(v =>
+            v.EmpleadoId == empleadoId &&
+            v.Estado == "APROBADA" &&
+            v.FechaInicio <= ultimoDia &&
+            v.FechaFin >= primerDia
+        )
         .Select(v => new
         {
             v.FechaInicio,
@@ -155,7 +173,124 @@ app.MapGet("/api/calendario/{empleadoId}", async (
     });
 });
 
+// ==========================================
+// CALENDARIO GENERAL DE TODOS LOS EMPLEADOS
+// ==========================================
 
+app.MapGet("/api/calendario", async (
+    int anio,
+    int mes,
+    ApplicationDbContext db) =>
+{
+    // Validar fechas
+    if (mes < 1 || mes > 12 || anio < 1 || anio > 9999)
+    {
+        return Results.BadRequest(new
+        {
+            mensaje = "El año o mes no son válidos"
+        });
+    }
+
+    // Obtener todos los empleados
+    var empleados = await db.Empleados
+        .AsNoTracking()
+        .Where(e => e.Activo)
+        .ToListAsync();
+
+    var empleadoIds = empleados
+        .Select(e => e.Id)
+        .ToList();
+
+    // Obtener horarios
+    var horarios = await db.HorariosEmpleados
+        .AsNoTracking()
+        .Where(h => empleadoIds.Contains(h.EmpleadoId))
+        .ToListAsync();
+
+    // Fechas del mes
+    var primerDia = new DateOnly(anio, mes, 1);
+
+    var ultimoDia = new DateOnly(
+        anio,
+        mes,
+        DateTime.DaysInMonth(anio, mes)
+    );
+
+    // Obtener vacaciones aprobadas
+    var vacaciones = await db.SolicitudesVacaciones
+        .AsNoTracking()
+        .Where(v =>
+            empleadoIds.Contains(v.EmpleadoId) &&
+            v.Estado == "APROBADA" &&
+            v.FechaInicio <= ultimoDia &&
+            v.FechaFin >= primerDia
+        )
+        .ToListAsync();
+
+    // Organizar horarios por empleado
+    var horariosPorEmpleado = horarios
+        .ToDictionary(h => h.EmpleadoId);
+
+    // Organizar vacaciones por empleado
+    var vacacionesPorEmpleado = vacaciones
+        .GroupBy(v => v.EmpleadoId)
+        .ToDictionary(g => g.Key, g => g.ToList());
+
+    // Construir información del calendario
+    var calendario = empleados.Select(empleado =>
+    {
+        horariosPorEmpleado.TryGetValue(
+            empleado.Id,
+            out var horario
+        );
+
+        vacacionesPorEmpleado.TryGetValue(
+            empleado.Id,
+            out var vacacionesEmpleado
+        );
+
+        DateOnly? guardia = horario != null
+            ? CalcularGuardiaMensual(
+                horario.PrimeraGuardia,
+                anio,
+                mes
+            )
+            : null;
+
+        return new
+        {
+            empleadoId = empleado.Id,
+            empleado.Nombre,
+            empleado.Apellido,
+            empleado.Puesto,
+
+            diaDescanso = horario?.DiaDescanso,
+
+            guardia,
+
+            vacaciones = vacacionesEmpleado == null
+                ? new List<object>()
+                : vacacionesEmpleado
+                    .Select(v => (object)new
+                    {
+                        v.FechaInicio,
+                        v.FechaFin
+                    })
+                    .ToList()
+        };
+    }).ToList();
+
+    return Results.Ok(new
+    {
+        anio,
+        mes,
+        empleados = calendario
+    });
+});
+
+// ==========================================
+// ESTADO DEL SERVIDOR
+// ==========================================
 
 app.MapGet("/api/status", () =>
 {
@@ -167,6 +302,10 @@ app.MapGet("/api/status", () =>
     });
 });
 
+// ==========================================
+// CONSULTAR USUARIOS
+// ==========================================
+
 app.MapGet("/api/usuarios", async (ApplicationDbContext db) =>
 {
     var usuarios = await db.Usuarios.ToListAsync();
@@ -174,19 +313,31 @@ app.MapGet("/api/usuarios", async (ApplicationDbContext db) =>
     return Results.Ok(usuarios);
 });
 
-app.MapPost("/api/creacion-usuario", async (Usuario usuario, ApplicationDbContext db) =>
+// ==========================================
+// CREAR USUARIO
+// ==========================================
+
+app.MapPost("/api/creacion-usuario", async (
+    Usuario usuario,
+    ApplicationDbContext db) =>
 {
-    
-db.Usuarios.Add(usuario);
+    db.Usuarios.Add(usuario);
 
-await db.SaveChangesAsync();
+    await db.SaveChangesAsync();
 
-return Results.Created($"/api/creacion-usuario/{usuario.Id}",usuario);
-
-
+    return Results.Created(
+        $"/api/creacion-usuario/{usuario.Id}",
+        usuario
+    );
 });
 
-app.MapPost("/api/login", async (LoginRequest request, ApplicationDbContext db) =>
+// ==========================================
+// INICIAR SESIÓN
+// ==========================================
+
+app.MapPost("/api/login", async (
+    LoginRequest request,
+    ApplicationDbContext db) =>
 {
     var usuario = await db.Usuarios
         .FirstOrDefaultAsync(u => u.Correo == request.Correo);
@@ -209,5 +360,9 @@ app.MapPost("/api/login", async (LoginRequest request, ApplicationDbContext db) 
         usuario.Correo
     });
 });
+
+// ==========================================
+// INICIAR APLICACIÓN
+// ==========================================
 
 app.Run();
