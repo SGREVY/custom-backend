@@ -1,3 +1,4 @@
+
 namespace Backend_custom_test.API.Models;
 
 public class Usuario
@@ -11,4 +12,6 @@ public class Usuario
     public string ContrasenaHash { get; set; } = string.Empty;
 
     public bool Activo { get; set; } = true;
+
+    public string Rol { get; set; } = "EMPLEADO";
 }

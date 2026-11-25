@@ -335,6 +335,7 @@ app.MapPost("/api/creacion-usuario", async (
 // INICIAR SESIÓN
 // ==========================================
 
+
 app.MapPost("/api/login", async (
     LoginRequest request,
     ApplicationDbContext db) =>
@@ -357,9 +358,11 @@ app.MapPost("/api/login", async (
         mensaje = "Inicio de sesión correcto",
         usuario.Id,
         usuario.Nombre,
-        usuario.Correo
+        usuario.Correo,
+        usuario.Rol
     });
 });
+
 
 // ==========================================
 // INICIAR APLICACIÓN
