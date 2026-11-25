@@ -1,6 +1,41 @@
 using Backend_custom_test.API.Data;
 using Backend_custom_test.API.Models;
 using Microsoft.EntityFrameworkCore;
+
+static DateOnly CalcularGuardiaMensual(
+    DateOnly primeraGuardia,
+    int anio,
+    int mes)
+{
+    // Identificar qué sábado del mes corresponde
+    int numeroSabado = ((primeraGuardia.Day - 1) / 7) + 1;
+
+    // Encontrar el último sábado del mes
+    int ultimoDia = DateTime.DaysInMonth(anio, mes);
+
+    var ultimoDiaMes = new DateOnly(anio, mes, ultimoDia);
+
+    int ultimoSabado = ultimoDia -
+        ((int)ultimoDiaMes.DayOfWeek + 1) % 7;
+
+    // Encontrar el primer sábado del mes
+    int primerSabado = 1;
+
+    while (new DateOnly(anio, mes, primerSabado).DayOfWeek
+           != DayOfWeek.Saturday)
+    {
+        primerSabado++;
+    }
+
+    // Calcular el sábado correspondiente
+    int dia = primerSabado + (numeroSabado - 1) * 7;
+
+    // Si no existe, utilizar el último sábado
+    dia = Math.Min(dia, ultimoSabado);
+
+    return new DateOnly(anio, mes, dia);
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
@@ -63,6 +98,60 @@ app.MapGet("/api/perfil/{usuarioId}", async (
         empleado.Departamento,
         empleado.FechaIngreso,
         empleado.Activo
+    });
+});
+
+
+app.MapGet("/api/calendario/{empleadoId}", async (
+    int empleadoId,
+    int anio,
+    int mes,
+    ApplicationDbContext db) =>
+{
+    if (mes < 1 || mes > 12)
+    {
+        return Results.BadRequest(new
+        {
+            mensaje = "El mes debe estar entre 1 y 12"
+        });
+    }
+
+    var horario = await db.HorariosEmpleados
+        .FirstOrDefaultAsync(h => h.EmpleadoId == empleadoId);
+
+    if (horario == null)
+    {
+        return Results.NotFound(new
+        {
+            mensaje = "No se encontró el horario del empleado"
+        });
+    }
+
+    var vacaciones = await db.SolicitudesVacaciones
+        .Where(v => v.EmpleadoId == empleadoId &&
+                    v.Estado == "APROBADA" &&
+                    v.FechaInicio <= new DateOnly(anio, mes,
+                        DateTime.DaysInMonth(anio, mes)) &&
+                    v.FechaFin >= new DateOnly(anio, mes, 1))
+        .Select(v => new
+        {
+            v.FechaInicio,
+            v.FechaFin
+        })
+        .ToListAsync();
+
+    var guardia = CalcularGuardiaMensual(
+        horario.PrimeraGuardia,
+        anio,
+        mes
+    );
+
+    return Results.Ok(new
+    {
+        empleadoId,
+        diaDescanso = horario.DiaDescanso,
+        guardia,
+        vacaciones
     });
 });
 
