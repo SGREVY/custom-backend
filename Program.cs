@@ -71,7 +71,7 @@ var app = builder.Build();
 app.UseCors("ReactPolicy");
 
 // ==========================================
-// CONSULTAR SOLICITUDES DE VACACIONES
+// CONSULTAR SOLICITUDES DE UN EMPLEADO
 // ==========================================
 
 app.MapGet("/api/vacaciones/{usuarioId:int}", async (
@@ -179,6 +179,37 @@ app.MapPost("/api/vacaciones", async (
             solicitud.Estado
         }
     );
+});
+
+// ==========================================
+// CONSULTAR TODAS LAS SOLICITUDES PARA RH
+// ==========================================
+
+app.MapGet("/api/vacaciones/solicitudes", async (
+    ApplicationDbContext db) =>
+{
+    var solicitudes = await (
+        from v in db.SolicitudesVacaciones
+        join e in db.Empleados
+            on v.EmpleadoId equals e.Id
+        orderby v.FechaSolicitud descending
+        select new
+        {
+            v.Id,
+            v.EmpleadoId,
+            empleado = e.Nombre + " " + e.Apellido,
+            e.Departamento,
+            e.Puesto,
+            v.FechaInicio,
+            v.FechaFin,
+            v.Estado,
+            v.FechaSolicitud
+        }
+    )
+    .AsNoTracking()
+    .ToListAsync();
+
+    return Results.Ok(solicitudes);
 });
 
 // ==========================================
