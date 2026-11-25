@@ -359,7 +359,7 @@ app.MapPost("/api/login", async (
         usuario.Id,
         usuario.Nombre,
         usuario.Correo,
-        usuario.Rol
+        usuario.rol
     });
 });
 
