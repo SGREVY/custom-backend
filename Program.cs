@@ -12,10 +12,8 @@ static DateOnly CalcularGuardiaMensual(
     int anio,
     int mes)
 {
-    // Identificar qué sábado del mes corresponde
     int numeroSabado = ((primeraGuardia.Day - 1) / 7) + 1;
 
-    // Encontrar el último sábado del mes
     int ultimoDia = DateTime.DaysInMonth(anio, mes);
 
     var ultimoDiaMes = new DateOnly(anio, mes, ultimoDia);
@@ -23,7 +21,6 @@ static DateOnly CalcularGuardiaMensual(
     int ultimoSabado = ultimoDia -
         ((int)ultimoDiaMes.DayOfWeek + 1) % 7;
 
-    // Encontrar el primer sábado del mes
     int primerSabado = 1;
 
     while (new DateOnly(anio, mes, primerSabado).DayOfWeek
@@ -32,10 +29,8 @@ static DateOnly CalcularGuardiaMensual(
         primerSabado++;
     }
 
-    // Calcular el sábado correspondiente
     int dia = primerSabado + (numeroSabado - 1) * 7;
 
-    // Si no existe, utilizar el último sábado
     dia = Math.Min(dia, ultimoSabado);
 
     return new DateOnly(anio, mes, dia);
@@ -53,7 +48,10 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
     )
 );
 
-// Configuración CORS
+// ==========================================
+// CONFIGURACIÓN CORS
+// ==========================================
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("ReactPolicy", policy =>
@@ -71,6 +69,117 @@ builder.Services.AddCors(options =>
 var app = builder.Build();
 
 app.UseCors("ReactPolicy");
+
+// ==========================================
+// CONSULTAR SOLICITUDES DE VACACIONES
+// ==========================================
+
+app.MapGet("/api/vacaciones/{usuarioId:int}", async (
+    int usuarioId,
+    ApplicationDbContext db) =>
+{
+    var empleado = await db.Empleados
+        .FirstOrDefaultAsync(e => e.UsuarioId == usuarioId);
+
+    if (empleado == null)
+    {
+        return Results.NotFound(new
+        {
+            mensaje = "No se encontró el empleado."
+        });
+    }
+
+    var solicitudes = await db.SolicitudesVacaciones
+        .AsNoTracking()
+        .Where(v => v.EmpleadoId == empleado.Id)
+        .OrderByDescending(v => v.FechaSolicitud)
+        .Select(v => new
+        {
+            v.Id,
+            v.FechaInicio,
+            v.FechaFin,
+            v.Estado,
+            v.FechaSolicitud
+        })
+        .ToListAsync();
+
+    return Results.Ok(solicitudes);
+});
+
+// ==========================================
+// CREAR SOLICITUD DE VACACIONES
+// ==========================================
+
+app.MapPost("/api/vacaciones", async (
+    SolicitudVacacionesRequest request,
+    ApplicationDbContext db) =>
+{
+    if (request.FechaInicio == default ||
+        request.FechaFin == default ||
+        request.FechaFin < request.FechaInicio)
+    {
+        return Results.BadRequest(new
+        {
+            mensaje = "Las fechas de vacaciones no son válidas."
+        });
+    }
+
+    var empleado = await db.Empleados
+        .FirstOrDefaultAsync(e => e.UsuarioId == request.UsuarioId);
+
+    if (empleado == null || !empleado.Activo)
+    {
+        return Results.NotFound(new
+        {
+            mensaje = "No se encontró un empleado activo."
+        });
+    }
+
+    // Evitar solicitudes que se crucen con otras pendientes o aprobadas
+    var existeConflicto = await db.SolicitudesVacaciones
+        .AnyAsync(v =>
+            v.EmpleadoId == empleado.Id &&
+            (v.Estado == "PENDIENTE" || v.Estado == "APROBADA") &&
+            v.FechaInicio <= request.FechaFin &&
+            v.FechaFin >= request.FechaInicio
+        );
+
+    if (existeConflicto)
+    {
+        return Results.BadRequest(new
+        {
+            mensaje = "Ya existe una solicitud pendiente o aprobada en esas fechas."
+        });
+    }
+
+    var solicitud = new SolicitudVacaciones
+    {
+        EmpleadoId = empleado.Id,
+        FechaInicio = request.FechaInicio,
+        FechaFin = request.FechaFin,
+        Estado = "PENDIENTE",
+        FechaSolicitud = DateTime.SpecifyKind(
+            DateTime.UtcNow,
+            DateTimeKind.Unspecified
+        )
+    };
+
+    db.SolicitudesVacaciones.Add(solicitud);
+
+    await db.SaveChangesAsync();
+
+    return Results.Created(
+        $"/api/vacaciones/{request.UsuarioId}",
+        new
+        {
+            mensaje = "Solicitud enviada correctamente.",
+            solicitud.Id,
+            solicitud.FechaInicio,
+            solicitud.FechaFin,
+            solicitud.Estado
+        }
+    );
+});
 
 // ==========================================
 // PERFIL DEL EMPLEADO
@@ -182,7 +291,6 @@ app.MapGet("/api/calendario", async (
     int mes,
     ApplicationDbContext db) =>
 {
-    // Validar fechas
     if (mes < 1 || mes > 12 || anio < 1 || anio > 9999)
     {
         return Results.BadRequest(new
@@ -191,7 +299,6 @@ app.MapGet("/api/calendario", async (
         });
     }
 
-    // Obtener todos los empleados
     var empleados = await db.Empleados
         .AsNoTracking()
         .Where(e => e.Activo)
@@ -201,13 +308,11 @@ app.MapGet("/api/calendario", async (
         .Select(e => e.Id)
         .ToList();
 
-    // Obtener horarios
     var horarios = await db.HorariosEmpleados
         .AsNoTracking()
         .Where(h => empleadoIds.Contains(h.EmpleadoId))
         .ToListAsync();
 
-    // Fechas del mes
     var primerDia = new DateOnly(anio, mes, 1);
 
     var ultimoDia = new DateOnly(
@@ -216,7 +321,6 @@ app.MapGet("/api/calendario", async (
         DateTime.DaysInMonth(anio, mes)
     );
 
-    // Obtener vacaciones aprobadas
     var vacaciones = await db.SolicitudesVacaciones
         .AsNoTracking()
         .Where(v =>
@@ -227,16 +331,13 @@ app.MapGet("/api/calendario", async (
         )
         .ToListAsync();
 
-    // Organizar horarios por empleado
     var horariosPorEmpleado = horarios
         .ToDictionary(h => h.EmpleadoId);
 
-    // Organizar vacaciones por empleado
     var vacacionesPorEmpleado = vacaciones
         .GroupBy(v => v.EmpleadoId)
         .ToDictionary(g => g.Key, g => g.ToList());
 
-    // Construir información del calendario
     var calendario = empleados.Select(empleado =>
     {
         horariosPorEmpleado.TryGetValue(
@@ -335,7 +436,6 @@ app.MapPost("/api/creacion-usuario", async (
 // INICIAR SESIÓN
 // ==========================================
 
-
 app.MapPost("/api/login", async (
     LoginRequest request,
     ApplicationDbContext db) =>
@@ -363,9 +463,18 @@ app.MapPost("/api/login", async (
     });
 });
 
-
 // ==========================================
 // INICIAR APLICACIÓN
 // ==========================================
 
 app.Run();
+
+// ==========================================
+// MODELO PARA RECIBIR SOLICITUDES
+// ==========================================
+
+public record SolicitudVacacionesRequest(
+    int UsuarioId,
+    DateOnly FechaInicio,
+    DateOnly FechaFin
+);
